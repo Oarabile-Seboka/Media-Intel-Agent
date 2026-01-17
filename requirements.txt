@@ -1,0 +1,10 @@
+feedparser
+requests
+pyyaml
+python-dotenv
+google-generativeai
+beautifulsoup4
+fastapi
+uvicorn
+pydantic
+duckduckgo-search
