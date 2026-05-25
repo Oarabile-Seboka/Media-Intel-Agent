@@ -1,7 +1,7 @@
 import os
 import json
 import yaml
-from google import genai
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,38 +9,61 @@ load_dotenv()
 class ContentAnalyzer:
     def __init__(self, config_path="config.yaml"):
         self.config = self._load_config(config_path)
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.api_key = os.getenv("PERPLEXITY_API_KEY")
         
         if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
-            self.model_name = self.config.get('llm', {}).get('model', 'gemini-1.5-flash')
+            self.model_name = self.config.get('llm', {}).get('model', 'sonar-pro')
         else:
-            self.client = None
-            print("Warning: No GEMINI_API_KEY found. Running in mock mode.")
+            self.model_name = None
+            print("Warning: No PERPLEXITY_API_KEY found. Running in mock mode.")
 
     def _load_config(self, path):
         with open(path, 'r') as f:
             return yaml.safe_load(f)
 
     def analyze_article(self, article):
-        if not self.client:
+        if not self.api_key:
             return self._mock_analyze(article)
 
         prompt = self._construct_prompt(article)
         
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a personal news intelligence assistant. You must output only valid JSON without any markdown code blocks or extra text."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
                 }
-            )
+            ],
+            "temperature": self.config.get('llm', {}).get('temperature', 0.2)
+        }
+        
+        try:
+            response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=payload)
+            response.raise_for_status()
             
-            # The new SDK parses text automatically if response_mime_type is set, 
-            # but let's be safe and check response.text or use response.parsed if supported
-            # For now, response.text + json.loads is robust
-            result = json.loads(response.text)
+            data = response.json()
+            content = data['choices'][0]['message']['content'].strip()
+            
+            # Remove potential markdown formatting for JSON
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            result = json.loads(content)
             
             if not isinstance(result, dict):
                 print(f"Warning: LLM returned non-dict response: {result}")
@@ -48,6 +71,8 @@ class ContentAnalyzer:
             return result
         except Exception as e:
             print(f"Error analyzing article: {e}")
+            if 'response' in locals() and hasattr(response, 'text'):
+                print(f"Response details: {response.text}")
             return self._mock_analyze(article)
 
 
@@ -68,9 +93,9 @@ class ContentAnalyzer:
         Possible Categories: {', '.join(categories)}
 
         CRITICAL INSTRUCTION: 
-        Compare the article content rigorously against the User Interests. 
-        - If the article is NOT related to any of the interests, set "relevance_score" to "Low".
-        - If it is tangentially related, set to "Medium".
+        Compare the article content against the User Interests, keeping in mind that the user performs second and third-order analysis.
+        - If the article has NO bearing on the interests, even indirectly, set "relevance_score" to "Low".
+        - If it provides background, foundational information, or is tangentially related (valuable for second-order analysis), set to "Medium".
         - If it directly impacts or discusses a core interest, set to "High".
         
         Required JSON Structure:

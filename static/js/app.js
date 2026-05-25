@@ -74,15 +74,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterEndDate = document.getElementById('filter-end-date');
     const clearFiltersBtn = document.getElementById('clear-filters-btn');
 
+    function getSavedFilters() {
+        const saved = localStorage.getItem('feedFilters');
+        if (!saved) return {};
+        try {
+            const parsed = JSON.parse(saved);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (error) {
+            console.warn('Invalid saved filters in localStorage, resetting.', error);
+            localStorage.removeItem('feedFilters');
+            return {};
+        }
+    }
+
     // Persistence: Load filters from localStorage
     function loadSavedFilters() {
-        const saved = localStorage.getItem('feedFilters');
-        if (saved) {
-            const filters = JSON.parse(saved);
-            filterCategory.value = filters.category || '';
-            filterStartDate.value = filters.start_date || '';
-            filterEndDate.value = filters.end_date || '';
-        }
+        const filters = getSavedFilters();
+        filterCategory.value = filters.category || '';
+        filterStartDate.value = filters.start_date || '';
+        filterEndDate.value = filters.end_date || '';
     }
 
     function saveCurrentFilters() {
@@ -118,7 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/categories');
             const categories = await response.json();
 
-            const currentVal = filterCategory.value || (JSON.parse(localStorage.getItem('feedFilters')) || {}).category;
+            const currentVal = filterCategory.value || getSavedFilters().category;
             filterCategory.innerHTML = '<option value="">All Categories</option>';
             categories.forEach(cat => {
                 const opt = document.createElement('option');
@@ -319,6 +329,22 @@ document.addEventListener('DOMContentLoaded', () => {
             showStatus('Network error.', 'error');
         }
     });
+
+    // Export Logic
+    const exportCsvBtn = document.getElementById('export-csv-btn');
+    const exportLimitInput = document.getElementById('export-limit');
+
+    if (exportCsvBtn && exportLimitInput) {
+        exportCsvBtn.addEventListener('click', () => {
+            const limit = exportLimitInput.value.trim();
+            let url = '/api/export/csv';
+            if (limit) {
+                url += `?limit=${encodeURIComponent(limit)}`;
+            }
+            // Safari can block async blob downloads; direct navigation is reliable.
+            window.location.href = url;
+        });
+    }
 
     function showStatus(msg, type) {
 

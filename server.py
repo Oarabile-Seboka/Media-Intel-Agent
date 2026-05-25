@@ -1,8 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
+import csv
+import io
+import sqlite3
 import yaml
 import os
 from src.storage import Storage
@@ -69,13 +72,19 @@ def scheduled_ingest():
             # We need to wrap the logic to merge results
             def process_article(art):
                 analysis = analyzer.analyze_article(art)
+                relevance = analysis.get("relevance_score", "").lower()
+                usefulness = analysis.get("usefulness", "").lower()
+                
+                if relevance == "low":
+                    return None
+                    
                 art.update(analysis)
                 return art
 
             analyzed_articles = list(executor.map(process_article, to_analyze))
 
         for article in analyzed_articles:
-            if storage.add_article(article):
+            if article is not None and storage.add_article(article):
                 count += 1
         logger.info(f"Scheduled ingestion complete. {count} new articles.")
     except Exception as e:
@@ -131,6 +140,36 @@ def get_articles(
 def get_categories():
     return storage.get_unique_categories()
 
+@app.get("/api/export/csv")
+def export_csv(limit: Optional[int] = None):
+    conn = sqlite3.connect(storage.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    query = 'SELECT * FROM articles ORDER BY created_at DESC'
+    if limit is not None:
+        query += f' LIMIT {int(limit)}'
+
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No data available to export")
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(dict(row))
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=articles_export.csv"}
+    )
+
 @app.delete("/api/articles/{article_id}")
 def delete_article(article_id: int):
     if storage.delete_article(article_id):
@@ -170,13 +209,19 @@ def ingest():
         with ThreadPoolExecutor(max_workers=5) as executor:
             def process_article(art):
                 analysis = analyzer.analyze_article(art)
+                relevance = analysis.get("relevance_score", "").lower()
+                usefulness = analysis.get("usefulness", "").lower()
+                
+                if relevance == "low":
+                    return None
+                    
                 art.update(analysis)
                 return art
 
             analyzed_articles = list(executor.map(process_article, to_analyze))
 
         for article in analyzed_articles:
-            if storage.add_article(article):
+            if article is not None and storage.add_article(article):
                 count += 1
         return {"status": "success", "new_articles": count}
     except Exception as e:

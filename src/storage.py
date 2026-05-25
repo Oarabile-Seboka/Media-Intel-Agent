@@ -185,3 +185,31 @@ class Storage:
         changes = conn.total_changes
         conn.close()
         return changes
+
+    def export_to_csv(self, output_path="data/articles_export.csv", limit=None):
+        import csv
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        query = 'SELECT * FROM articles ORDER BY created_at DESC'
+        if limit is not None:
+            query += f' LIMIT {int(limit)}'
+            
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        
+        if not rows:
+            conn.close()
+            return None
+            
+        fieldnames = rows[0].keys()
+        
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(dict(row))
+                
+        conn.close()
+        return output_path

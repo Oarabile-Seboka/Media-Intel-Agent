@@ -13,13 +13,18 @@ class RSSFetcher:
             return yaml.safe_load(f)
 
     def fetch_all(self):
-        new_articles = []
+        all_feeds_articles = []
         feeds = self.config.get('feeds', [])
         
         for feed_config in feeds:
             print(f"Fetching {feed_config['name']}...")
-            feed = feedparser.parse(feed_config['url'])
-            
+            try:
+                feed = feedparser.parse(feed_config['url'])
+            except Exception as e:
+                print(f"Error fetching {feed_config['name']}: {e}")
+                continue
+                
+            feed_articles = []
             for entry in feed.entries:
                 url = entry.link
                 
@@ -65,6 +70,17 @@ class RSSFetcher:
                     'category_hint': feed_config.get('category'), # Pass hint from feed config
                     'image_url': image_url
                 }
-                new_articles.append(article)
-                
+                feed_articles.append(article)
+            
+            all_feeds_articles.append(feed_articles)
+            
+        # Interleave articles from all feeds to ensure fair distribution
+        new_articles = []
+        if all_feeds_articles:
+            max_len = max(len(fa) for fa in all_feeds_articles)
+            for i in range(max_len):
+                for fa in all_feeds_articles:
+                    if i < len(fa):
+                        new_articles.append(fa[i])
+                        
         return new_articles
